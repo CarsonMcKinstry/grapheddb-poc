@@ -1,0 +1,1 @@
+A place for me to play around with a GraphQL interface for IndexedDB

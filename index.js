@@ -19,8 +19,19 @@ const typeDefs = gql`
     text: String!
   }
 
+  type User {
+    id: ID!
+    name: String!
+    todos: [Todo]!
+  }
+
   input CreateTodoInput {
     text: String!
+    userId: ID!
+  }
+
+  input CreateUserInput {
+    name: String!
   }
 
   type Query {
@@ -29,10 +40,16 @@ const typeDefs = gql`
 
   type Mutation {
     createTodo(data: CreateTodoInput): Todo!
+    createUser(data: CreateUserInput): User!
   }
 `;
 
 const resolvers = {
+  User: {
+    todos: async (root, __, { db }) => {
+      // do the work of getting the todos here
+    }
+  },
   Query: {
     todos: async (_, __, { db }) => {
       const todos = await db.transaction('todos').objectStore('todos').getAll();
@@ -40,14 +57,35 @@ const resolvers = {
     }
   },
   Mutation: {
-    createTodo: async (root, { data: { text }}, { db }) => {
-      const tx = db.transaction('todos', 'readwrite');
+    createUser: async (root, { data: { name }}, { db }) => {
+      const tx = db.transaction('users', 'readwrite');
+      const usersStore = tx.objectStore('users');
+      const newUserId = await usersStore.put({
+        id: uuid(),
+        name
+      });
+
+      const user = usersStore.get(newUserId);
+
+      await tx.complete
+
+      return user;
+    },
+    createTodo: async (root, { data: { text, userId }}, { db }) => {
+      const tx = db.transaction(['todos', 'usersToTodos'], 'readwrite');
       const todosStore = tx.objectStore('todos');
-      const newTodoId = await todosStore.put({
+      const usersToTodos = tx.objectStore('usersToTodos');
+
+      const newTodoId = await todosStore.add({
         id: uuid(),
         createdAt: new Date / 1000,
         text,
         done: false,
+      });
+
+      await usersToTodos.add({
+        userId: userId,
+        todoId: newTodoId
       });
 
       const todo = todosStore.get(newTodoId);
@@ -55,7 +93,7 @@ const resolvers = {
       await tx.complete;
 
       return todo;
-    } 
+    }
   }
 }
 
@@ -65,23 +103,40 @@ const gdb = new GraphedDB({
   resolvers
 });
 
+
+
 const form = document.getElementById('new-todo-form')
 const input = document.getElementById('new-todo-input');
 const list = document.getElementById('todo-list');
+const button = document.getElementById('new-user');
+
+button.addEventListener('click', (e) => {
+  gdb.query(`
+    mutation CreateUser($name: String!) {
+      createUser(data: { name: $name }) {
+        id
+      }
+    }
+  `, { name: 'Carson' }).then(({ data: { createUser }}) => {
+      localStorage.setItem('user', createUser.id);
+  });
+})
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
 
   gdb.query(`
-    mutation CreateTodo($text: String!) {
-      createTodo(data: { text: $text }) {
+    mutation CreateTodo($text: String!, $user: ID!) {
+      createTodo(data: { text: $text, userId: $user}) {
         id
       }
     }
   `, {
-    text: input.value
+    text: input.value,
+    user: localStorage.getItem('user'),
   })
     .then(id => {
+      console.log(id);
       input.value = '';
 
       render();
@@ -89,7 +144,6 @@ form.addEventListener('submit', (e) => {
 })
 
 async function render() {
-
   while(list.firstChild) {
     list.removeChild(list.firstChild);
   }
@@ -103,6 +157,9 @@ async function render() {
       }
     }
   `);
+  const userId = localStorage.getItem('user');
+  document.getElementById('user').innerText = userId;
+
   todos.forEach(todo => {
     const el = document.createElement('li');
 

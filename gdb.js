@@ -9,6 +9,10 @@ export default class GraphedDB {
       switch (upgradeDb.oldVersion) {
         case 0:
           const todosStore = upgradeDb.createObjectStore('todos', { keyPath: 'id' });
+          const usersStore = upgradeDb.createObjectStore('users', { keyPath: 'id' });
+          let usersToTodos = upgradeDb.createObjectStore('usersToTodos', { autoIncrement: true });
+          usersToTodos.createIndex('todoId', 'todoId');
+          usersToTodos.createIndex('userId', 'userId');
       }
     })
 
