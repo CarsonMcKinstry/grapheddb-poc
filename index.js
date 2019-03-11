@@ -36,6 +36,7 @@ const typeDefs = gql`
 
   type Query {
     todos: [Todo]!
+    users: [User]!
   }
 
   type Mutation {
@@ -47,17 +48,23 @@ const typeDefs = gql`
 const resolvers = {
   User: {
     todos: async (root, __, { db }) => {
-      // do the work of getting the todos here
+      const postedByIndex = await db.transaction('todos').objectStore('todos').index('postedBy').getAll(root.id);
+
+      return postedByIndex;
     }
   },
   Query: {
     todos: async (_, __, { db }) => {
       const todos = await db.transaction('todos').objectStore('todos').getAll();
-      return todos.sort((a, b) => a.createdAt - b.createdAt);
+      return todos;
+    },
+    users: async (_, __, { db }) => {
+      const users = await db.transaction('users').objectStore('users').getAll();
+      return users;
     }
   },
   Mutation: {
-    createUser: async (root, { data: { name }}, { db }) => {
+    createUser: async (root, { data: { name } }, { db }) => {
       const tx = db.transaction('users', 'readwrite');
       const usersStore = tx.objectStore('users');
       const newUserId = await usersStore.put({
@@ -71,21 +78,16 @@ const resolvers = {
 
       return user;
     },
-    createTodo: async (root, { data: { text, userId }}, { db }) => {
-      const tx = db.transaction(['todos', 'usersToTodos'], 'readwrite');
+    createTodo: async (root, { data: { text, userId } }, { db }) => {
+      const tx = db.transaction(['todos'], 'readwrite');
       const todosStore = tx.objectStore('todos');
-      const usersToTodos = tx.objectStore('usersToTodos');
 
       const newTodoId = await todosStore.add({
         id: uuid(),
         createdAt: new Date / 1000,
         text,
         done: false,
-      });
-
-      await usersToTodos.add({
-        userId: userId,
-        todoId: newTodoId
+        postedBy: userId
       });
 
       const todo = todosStore.get(newTodoId);
@@ -117,9 +119,14 @@ button.addEventListener('click', (e) => {
         id
       }
     }
-  `, { name: 'Carson' }).then(({ data: { createUser }}) => {
+  `, { name: 'Carson' })
+    .then(r => {
+      const { data: { createUser } } = r;
+
       localStorage.setItem('user', createUser.id);
-  });
+      render();
+    })
+    .catch(err => console.log(err));
 })
 
 form.addEventListener('submit', (e) => {
@@ -132,9 +139,9 @@ form.addEventListener('submit', (e) => {
       }
     }
   `, {
-    text: input.value,
-    user: localStorage.getItem('user'),
-  })
+      text: input.value,
+      user: localStorage.getItem('user'),
+    })
     .then(id => {
       console.log(id);
       input.value = '';
@@ -144,11 +151,11 @@ form.addEventListener('submit', (e) => {
 })
 
 async function render() {
-  while(list.firstChild) {
+  while (list.firstChild) {
     list.removeChild(list.firstChild);
   }
 
-  const { data: { todos } } = await gdb.query(`
+  const { data } = await gdb.query(`
     {
       todos {
         id
@@ -157,16 +164,31 @@ async function render() {
       }
     }
   `);
-  const userId = localStorage.getItem('user');
-  document.getElementById('user').innerText = userId;
+  if (data) {
+    const { todos } = data;
 
-  todos.forEach(todo => {
-    const el = document.createElement('li');
+    const userId = localStorage.getItem('user');
+    document.getElementById('user').innerText = userId;
 
-    el.textContent = todo.text;
+    todos.forEach(todo => {
+      const el = document.createElement('li');
 
-    list.appendChild(el);
-  });
+      el.textContent = todo.text;
+
+      list.appendChild(el);
+    });
+  }
 }
 
 render();
+
+gdb.query(`
+  query {
+    users {
+      todos {
+        id
+      }
+    }
+  }
+`)
+  .then(console.log);
